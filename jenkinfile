@@ -1,0 +1,96 @@
+pipeline {
+    agent any
+    tools {
+        maven 'Maven3'
+    }
+    environment {
+        registryName='devresourceacr'
+        registryCredential = 'ACR_DEV_ID'
+        dockerImage = ''
+        NEW_IMAGE_TAG = "${ACR_LOGINSERVER_DEV}/azure-springboot-login:app${BUILD_NUMBER}"
+        DEPLOYMENT_FILE = 'aks-deployment-manifest.yaml'
+    }
+
+    stages {
+        
+        stage("Cleanup Workspace"){
+            steps {
+                cleanWs()
+            }
+
+        }
+        stage('checkout') {
+            steps {
+                //checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/nirmalkochu/todo-springboot-app-aks-deployment.git']])
+                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[credentialsId: 'jenkins-user-github', url: 'git@github.com:nirmalkochu/todo-springboot-app-aks-deployment.git']])
+            }
+            
+        }
+        stage ('Build') {
+            steps {
+                sh 'mvn clean install'           
+            }
+        }
+        stage("Unit Tests"){
+            steps {
+                sh "mvn test"
+            }
+            post {
+                always {
+                    junit 'target/surefire-reports/*.xml'
+                }
+            }
+
+        }
+        stage('SonarQube Analysis') {
+            steps{
+             withSonarQubeEnv('Sonarqube-1') {
+             sh '''
+              mvn clean verify sonar:sonar \
+                -Dsonar.projectKey=test-jenkins \
+                -Dsonar.host.url=http://4.172.210.117:9000 \
+                -Dsonar.login=squ_0ad5f01e9b0bb4997d877cc9f85625207656d270
+              '''
+            }
+        }
+    }
+
+
+        stage ('Build Docker image') {
+            steps {
+                script {
+                    dockerImage = docker.build NEW_IMAGE_TAG
+                }
+            }
+        }
+        stage('Upload Image to ACR') {
+            steps{   
+                script {
+                        docker.withRegistry( "http://${ACR_LOGINSERVER_DEV}", registryCredential ) {
+                        dockerImage.push()
+                    }
+                }
+            }
+        }
+        
+        stage ('K8S Deploy') {
+            steps {
+                script {
+                    // Read the deployment.yaml file
+                    def deploymentYaml = readFile(DEPLOYMENT_FILE)
+                    
+                    // Replace the old image tag with the new one
+                    deploymentYaml = deploymentYaml.replaceAll(/image: .*/, "image: ${NEW_IMAGE_TAG}")
+                    
+                    // Write the updated content back to deployment.yaml
+                    writeFile file: DEPLOYMENT_FILE, text: deploymentYaml
+                    
+                    withKubeConfig(caCertificate: '', clusterName: '', contextName: '', credentialsId: 'DEV_AKS_CRED', namespace: '', restrictKubeConfigAccess: false, serverUrl: '') {
+                        sh ("kubectl apply -f  ${DEPLOYMENT_FILE}")
+                    }
+                
+                }
+            }
+        }
+    }
+}

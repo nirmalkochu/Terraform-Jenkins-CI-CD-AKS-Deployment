@@ -1,0 +1,126 @@
+pipeline {
+    agent any
+    tools {
+        maven 'Maven3'
+    }
+    parameters {
+        string(
+            name: 'email', 
+            defaultValue: 'akshay.kothoor@gmail.com', 
+            description: 'Email address to send notification' )
+    }
+    environment {
+        registryName='devresourceacr'
+        registryCredential = 'ACR_DEV_ID'
+        dockerImage = ''
+        NEW_IMAGE_TAG = "${ACR_LOGINSERVER_DEV}/azure-springboot-login:app${BUILD_NUMBER}"
+        DEPLOYMENT_FILE = 'aks-deployment-manifest.yaml'
+    }
+
+    stages {
+        
+        stage("Cleanup Workspace"){
+            steps {
+                cleanWs()
+            }
+
+        }
+        stage('checkout') {
+            steps {
+                //checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/nirmalkochu/todo-springboot-app-aks-deployment.git']])
+                checkout scmGit(branches: [[name: '*/dev']], extensions: [], userRemoteConfigs: [[credentialsId: 'jenkins-user-github', url: 'git@github.com:nirmalkochu/todo-springboot-app-aks-deployment.git']])
+            }
+            
+        }
+        stage ('Build') {
+            steps {
+                sh 'mvn clean install'           
+            }
+        }
+        stage("Unit Tests"){
+            steps {
+                sh "mvn test"
+            }
+            post {
+                always {
+                    junit 'target/surefire-reports/*.xml'
+                }
+            }
+
+        }
+        stage('SonarQube Analysis') {
+            steps {
+               withSonarQubeEnv('Sonarqube-1') {
+                sh '''
+                  mvn clean verify sonar:sonar \
+                  -Dsonar.projectKey=test-jenkins \
+                  -Dsonar.host.url=http://20.191.96.215:9000 \
+                  -Dsonar.login=sqp_96ed7e6ab6b2c00c6357cae350c89952f3dd9b22
+                  
+                   '''
+                }
+            }
+        }
+
+        stage("Quality Gate") {
+            steps {
+                timeout(time: 2, unit: 'MINUTES') {
+                    script {
+                        def qg = waitForQualityGate()
+                        if (qg.status != 'OK') {
+                            error "Pipeline aborted due to quality gate failure: ${qg.status}"
+                        }
+                    }
+                }
+            }
+        }
+
+
+        stage ('Build Docker image') {
+            steps {
+                script {
+                    dockerImage = docker.build NEW_IMAGE_TAG
+                }
+            }
+        }
+        stage('Upload Image to ACR') {
+            steps{   
+                script {
+                        docker.withRegistry( "http://${ACR_LOGINSERVER_DEV}", registryCredential ) {
+                        dockerImage.push()
+                    }
+                }
+            }
+        }
+        
+        stage ('K8S Deploy') {
+            steps {
+                script {
+                    // Read the deployment.yaml file
+                    def deploymentYaml = readFile(DEPLOYMENT_FILE)
+                    
+                    // Replace the old image tag with the new one
+                    deploymentYaml = deploymentYaml.replaceAll(/image: .*/, "image: ${NEW_IMAGE_TAG}")
+                    
+                    // Write the updated content back to deployment.yaml
+                    writeFile file: DEPLOYMENT_FILE, text: deploymentYaml
+                    
+                    withKubeConfig(caCertificate: '', clusterName: '', contextName: '', credentialsId: 'DEV_AKS_CRED', namespace: '', restrictKubeConfigAccess: false, serverUrl: '') {
+                        sh ("kubectl apply -f  ${DEPLOYMENT_FILE}")
+                    }
+                
+                }
+            }
+        }
+        
+
+        
+
+    
+    }
+    post {
+        always {
+            mail bcc: '', body: """'Project: ${env.JOB_NAME}<br/> Build Number: ${env.BUILD_NUMBER}<br/> URL:${env.BUILD_URL}'""", cc: '', from: '', replyTo: '', subject: "'${currentBuild.result}'", to: 'akshay.kothoor@gmail.com'
+        }
+    }
+}

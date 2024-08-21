@@ -1,5 +1,5 @@
 Project Title:
-CI/CD Pipeline for the deployment of the web application using the CI/CD tools and Azure
+CI/CD Pipeline for the AKS deployment of the web application using the CI/CD tools and Azure
 Cloud.
 
 Project Description:

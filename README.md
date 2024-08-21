@@ -1,19 +1,19 @@
-Project Title
+Project Title:
 CI/CD Pipeline for the deployment of the web application using the CI/CD tools and Azure
 Cloud.
 
-Project Description
+Project Description:
 This project aims to deploy an open-source web application on the Azure cloud platform,
 utilizing Terraform for infrastructure setup. It also involves establishing an automated
 deployment pipeline with Jenkins to support continuous integration and continuous
 deployment (CI/CD). Upon successful deployment, the objective is to monitor the web
 application using Azure Monitor and Application Insights.
 
-Project Architecture
+Project Architecture:
 ![image](https://github.com/user-attachments/assets/495ce75e-ea23-4166-9888-9ce8aeaf2a41)
 
 
-Project Approach
+Project Approach:
 This project aims to implement the following actions on the web application deployment.
  Provisioning infrastructure using Infrastructure as Code (IaC) services
  Leveraging cloud services
